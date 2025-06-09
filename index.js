@@ -45,7 +45,7 @@ app.get('/', (req, res) => {
 app.get('/ver', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limitNum = parseInt(req.query.limit) || 50;
+    const limitNum = parseInt(req.query.limit) || 9500;
     const distancia = req.query.distancia;
 
     // Clave para el caché
