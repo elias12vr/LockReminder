@@ -4,7 +4,7 @@
     "compression": "^1.8.0",
     "cors": "^2.8.5",
     "express": "^5.1.0",
-    "firebase": "^11.6.0",
+    "firebase": "^11.9.1",
     "node-cache": "^5.1.2"
   }
 }
