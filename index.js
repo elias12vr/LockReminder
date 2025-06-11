@@ -29,8 +29,8 @@ app.get('/', (req, res) => {
   res.send(
     '<h1>API Express & Firebase Monitoreo ESP32</h1><ul>' +
     '<li><p><b>GET /ver</b> - Ver todos los valores (parámetro opcional: distancia)</p></li>' +
-    '<li><p><b>GET /valor</b> - Último valor</p></li>' +
-    '<li><p><b>GET /estado</b> - Último estado de conexión</p></li>' +
+    '<li><p><b>GET /valor</b> - Todos los valores ordenados por fecha</p></li>' +
+    '<li><p><b>GET /estado</b> - Todos los estados de conexión ordenados por fecha</p></li>' +
     '<li><p><b>POST /insertar</b> - {distancia, nombre, fecha}</p></li>' +
     '<li><p><b>POST /estado</b> - {conectado, nombre}</p></li>' +
     '<li><p><b>POST /notificar</b> - {titulo, mensaje, token}</p></li>' +
@@ -75,16 +75,16 @@ app.get('/ver', async (req, res) => {
   }
 });
 
-// Endpoint para obtener el último valor
+// Endpoint para obtener todos los valores (sin límite)
 app.get('/valor', async (req, res) => {
   try {
-    const cacheKey = 'ultimo_valor';
+    const cacheKey = 'todos_valores';
     const cachedData = cache.get(cacheKey);
     if (cachedData) {
       return res.send(cachedData);
     }
 
-    const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(1));
+    const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'));
     const snapshot = await getDocs(q);
     const data = snapshot.docs.map(doc => ({
       id: doc.id,
@@ -95,25 +95,25 @@ app.get('/valor', async (req, res) => {
     cache.set(cacheKey, data);
     res.send(data);
   } catch (error) {
-    console.error('Error al obtener último valor:', error);
+    console.error('Error al obtener valores:', error);
     res.status(500).send({
-      error: 'Error al obtener último valor',
+      error: 'Error al obtener valores',
       message: error.message || 'Error desconocido',
       code: error.code || 'UNKNOWN'
     });
   }
 });
 
-// Endpoint para obtener el último estado
+// Endpoint para obtener todos los estados (sin límite)
 app.get('/estado', async (req, res) => {
   try {
-    const cacheKey = 'ultimo_estado';
+    const cacheKey = 'todos_estados';
     const cachedData = cache.get(cacheKey);
     if (cachedData) {
       return res.send(cachedData);
     }
 
-    const q = query(collection(db, 'Estado'), orderBy('fecha', 'desc'), limit(1));
+    const q = query(collection(db, 'Estado'), orderBy('fecha', 'desc'));
     const snapshot = await getDocs(q);
     const data = snapshot.docs.map(doc => ({
       id: doc.id,
@@ -124,9 +124,9 @@ app.get('/estado', async (req, res) => {
     cache.set(cacheKey, data);
     res.send(data);
   } catch (error) {
-    console.error('Error al obtener estado:', error);
+    console.error('Error al obtener estados:', error);
     res.status(500).send({
-      error: 'Error al obtener estado',
+      error: 'Error al obtener estados',
       message: error.message || 'Error desconocido',
       code: error.code || 'UNKNOWN'
     });
