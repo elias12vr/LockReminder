@@ -161,7 +161,7 @@ app.post('/insertar', async (req, res) => {
     cache.flushAll();
     console.log('Caché de valores invalidada por nueva inserción.');
 
-    res.status(201).send({ id: docRef.id, ...docData, status: 'Valores insertados' });
+    res.status(201).send({ ...docData, status: 'Valores insertados' });
   } catch (error) {
     res.status(500).send({ error: 'Error en /insertar', message: error.message });
   }
