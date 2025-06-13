@@ -1,12 +1,13 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const db = require('./fire'); // Ya es instancia de Firestore
+const compression = require('compression');
+const NodeCache = require('node-cache');
+const db = require('./fire'); // Tu inicialización de Firestore
 
 const {
   collection,
   getDocs,
-  getFirestore,
   query,
   orderBy,
   limit,
@@ -16,102 +17,183 @@ const {
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Caché con TTL de 5 minutos (300 segundos)
+const cache = new NodeCache({ stdTTL: 300 });
+
+// --- Middleware ---
 app.use(cors());
+app.use(compression({ level: 6 }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 
+// Middleware Cache-Control para navegador
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  next();
+});
+
+// --- Rutas ---
+
+// Documentación raíz
 app.get('/', (req, res) => {
   res.send(
-    '<h1>API Express & Firebase Monitoreo ESP32</h1><ul>' +
-    '<li><p><b>GET /ver</b> - Ver todos los valores</p></li>' +
-    '<li><p><b>GET /valor</b> - Último valor</p></li>' +
-    '<li><p><b>GET /estado</b> - Último estado de conexión</p></li>' +
-    '<li><p><b>POST /insertar</b> - {distancia, nombre, fecha}</p></li>' +
-    '<li><p><b>POST /notificar</b> - {titulo, mensaje, token}</p></li>' +
-    '</ul>'
+    `<h1>API Express & Firebase Monitoreo ESP32</h1><ul>
+      <li><b>GET /ver</b> - Ver últimos 50 valores (sin filtros)</li>
+      <li><b>GET /valor</b> - Todos los valores (limitados)</li>
+      <li><b>GET /valor/min</b> - Valores con respuesta mínima</li>
+      <li><b>GET /estado</b> - Estados de conexión (limit)</li>
+      <li><b>POST /insertar</b> - {distancia, nombre, fecha}</li>
+      <li><b>POST /estado</b> - {conectado, nombre}</li>
+      <li><b>POST /notificar</b> - {titulo, mensaje, token}</li>
+    </ul>`
   );
 });
 
+// GET /ver SIN FILTROS, últimos 50 datos
 app.get('/ver', async (req, res) => {
   try {
-    const q = query(collection(db, 'Valores'), orderBy('fecha', 'asc'));
+    const lim = 50;
+    const cacheKey = `ver_${lim}`;
+    const cachedData = cache.get(cacheKey);
+    if (cachedData) return res.send(cachedData);
+
+    const valoresCollection = collection(db, 'Valores');
+    const q = query(valoresCollection, orderBy('fecha', 'desc'), limit(lim));
     const snapshot = await getDocs(q);
-    const data = snapshot.docs.map(doc => doc.data());
+
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    cache.set(cacheKey, data);
     res.send(data);
   } catch (error) {
-    console.error('Error al obtener valores:', error);
-    res.status(500).send('Error al obtener valores');
+    console.error('Error en /ver:', error);
+    res.status(500).send({ error: 'Error al obtener registros', message: error.message });
   }
 });
 
+// GET /valor con límite configurable (máximo 1000)
 app.get('/valor', async (req, res) => {
   try {
-    const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(1));
+    let lim = parseInt(req.query.limit, 10) || 100;
+    if (lim > 1000) lim = 1000;
+
+    const cacheKey = `valor_${lim}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.send(cached);
+
+    const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(lim));
     const snapshot = await getDocs(q);
-    const data = snapshot.docs.map(doc => doc.data());
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    cache.set(cacheKey, data);
     res.send(data);
   } catch (error) {
-    console.error('Error al obtener último valor:', error);
-    res.status(500).send('Error al obtener último valor');
+    console.error('Error en /valor:', error);
+    res.status(500).send({ error: 'Error al obtener valores', message: error.message });
   }
 });
 
+// GET /valor/min (respuesta mínima)
+app.get('/valor/min', async (req, res) => {
+  try {
+    const lim = parseInt(req.query.limit, 10) || 50;
+    const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(lim));
+    const snapshot = await getDocs(q);
+
+    const data = snapshot.docs.map(doc => ({
+      d: doc.data().distancia,
+      f: doc.data().fecha
+    }));
+
+    res.send(data);
+  } catch (error) {
+    res.status(500).send({ error: 'Error en /valor/min', message: error.message });
+  }
+});
+
+// GET /estado con límite configurable (máximo 1000)
 app.get('/estado', async (req, res) => {
   try {
-    const q = query(collection(db, 'Estado'), orderBy('fecha', 'desc'), limit(1));
+    let lim = parseInt(req.query.limit, 10) || 100;
+    if (lim > 1000) lim = 1000;
+
+    const cacheKey = `estado_${lim}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return res.send(cached);
+
+    const q = query(collection(db, 'Estado'), orderBy('fecha', 'desc'), limit(lim));
     const snapshot = await getDocs(q);
-    const data = snapshot.docs.map(doc => doc.data());
+    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    cache.set(cacheKey, data);
     res.send(data);
   } catch (error) {
-    console.error('Error al obtener estado:', error);
-    res.status(500).send('Error al obtener estado');
+    res.status(500).send({ error: 'Error al obtener estados', message: error.message });
   }
 });
 
+// POST /insertar valor
 app.post('/insertar', async (req, res) => {
   try {
-    const { distancia, nombre } = req.body;
+    const { distancia, nombre, fecha } = req.body;
+    if (!distancia || !nombre) {
+      return res.status(400).send({ error: 'Faltan parámetros', message: 'distancia y nombre son requeridos' });
+    }
 
-    await addDoc(collection(db, 'Valores'), {
+    const docData = {
       distancia,
       nombre,
-      fecha: new Date().toISOString()
-    });
+      fecha: fecha || new Date().toISOString()
+    };
 
-    res.send({
-      distancia,
-      nombre,
-      fecha: new Date(),
-      status: 'Valores insertados!'
-    });
+    const docRef = await addDoc(collection(db, 'Valores'), docData);
+
+    cache.flushAll();
+    console.log('Caché de valores invalidada por nueva inserción.');
+
+    res.status(201).send({ id: docRef.id, ...docData, status: 'Valores insertados' });
   } catch (error) {
-    console.error('Error al insertar valores:', error);
-    res.status(500).send('Error al insertar valores');
+    res.status(500).send({ error: 'Error en /insertar', message: error.message });
   }
 });
 
+// POST /estado
 app.post('/estado', async (req, res) => {
   try {
     const { conectado, nombre } = req.body;
+    if (conectado === undefined || !nombre) {
+      return res.status(400).send({ error: 'Faltan parámetros', message: 'conectado y nombre son requeridos' });
+    }
 
-    await addDoc(collection(db, 'Estado'), {
-      conectado: conectado === 'true',
+    const docData = {
+      conectado: String(conectado).toLowerCase() === 'true',
       nombre,
       fecha: new Date().toISOString()
-    });
+    };
 
-    res.send({
-      conectado,
-      nombre,
-      fecha: new Date(),
-      status: 'Estado actualizado!'
-    });
+    const docRef = await addDoc(collection(db, 'Estado'), docData);
+
+    cache.flushAll();
+    console.log('Caché de estado invalidada por nueva inserción.');
+
+    res.status(201).send({ id: docRef.id, ...docData, status: 'Estado actualizado' });
   } catch (error) {
-    console.error('Error al insertar estado:', error);
-    res.status(500).send('Error al insertar estado');
+    res.status(500).send({ error: 'Error en /estado', message: error.message });
   }
 });
 
+// POST /notificar (estructura base)
+app.post('/notificar', (req, res) => {
+  const { titulo, mensaje, token } = req.body;
+  if (!titulo || !mensaje || !token) {
+    return res.status(400).send({ error: 'Faltan parámetros', message: 'titulo, mensaje y token son requeridos' });
+  }
+  // Aquí iría la lógica para enviar la notificación vía FCM
+  console.log(`Simulando envío de notificación a ${token}: ${titulo}`);
+  res.status(200).send({ status: 'Notificación enviada (simulada)' });
+});
+
+// --- Iniciar servidor ---
 app.listen(PORT, () => {
-  console.log(`Escuchando en puerto ${PORT}`);
+  console.log(`🚀 API lista en http://localhost:${PORT}`);
 });
