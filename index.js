@@ -1,276 +1,117 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const compression = require('compression');
-const NodeCache = require('node-cache');
-const db = require('./fire');
+const db = require('./fire'); // Ya es instancia de Firestore
 
 const {
   collection,
   getDocs,
+  getFirestore,
   query,
   orderBy,
-  where,
-  addDoc,
   limit,
-  Timestamp
+  addDoc
 } = require('firebase/firestore');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-const cache = new NodeCache({ stdTTL: 300 });
-
 app.use(cors());
-app.use(compression({ level: 6 }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 
-app.use((req, res, next) => {
-  res.setHeader('Cache-Control', 'public, max-age=300');
-  next();
-});
-
-// --- Rutas ---
-
 app.get('/', (req, res) => {
   res.send(
-    `<h1>API Express & Firebase Monitoreo ESP32</h1><ul>
-      <li><b>GET /ver</b> - Ver todos los valores</li>
-      <li><b>GET /valor</b> - Todos los valores (limitados)</li>
-      <li><b>GET /valor/min</b> - Valores con respuesta mínima</li>
-      <li><b>GET /estado</b> - Estados de conexión (limit)</li>
-      <li><b>POST /insertar</b> - {distancia, nombre, fecha}</li>
-      <li><b>POST /estado</b> - {conectado, nombre}</li>
-      <li><b>POST /notificar</b> - {titulo, mensaje, token}</li>
-    </ul>`
+    '<h1>API Express & Firebase Monitoreo ESP32</h1><ul>' +
+    '<li><p><b>GET /ver</b> - Ver los últimos 50 valores</p></li>' +
+    '<li><p><b>GET /valor</b> - Último valor</p></li>' +
+    '<li><p><b>GET /estado</b> - Último estado de conexión</p></li>' +
+    '<li><p><b>POST /insertar</b> - {distancia, nombre, fecha}</p></li>' +
+    '<li><p><b>POST /notificar</b> - {titulo, mensaje, token}</p></li>' +
+    '</ul>'
   );
 });
 
-// Helper function to convert fecha to ISO string
-const convertFechaToISO = (fecha) => {
-  if (fecha instanceof Timestamp) {
-    return fecha.toDate().toISOString();
-  } else if (typeof fecha === 'string') {
-    const date = new Date(fecha);
-    return isNaN(date.getTime()) ? null : date.toISOString();
-  }
-  return null; // Handle unexpected types
-};
-
-// GET /ver
 app.get('/ver', async (req, res) => {
   try {
-    const { distancia, desde, limit: limStr = '100' } = req.query;
-    const lim = parseInt(limStr, 10) || 100;
-
-    const cacheKey = `ver_${distancia || 'all'}_${desde || 'none'}_${lim}`;
-    const cachedData = cache.get(cacheKey);
-    if (cachedData) {
-      return res.send(cachedData);
-    }
-
-    const valoresCollection = collection(db, 'Valores');
-    const queryConstraints = [orderBy('fecha', 'desc'), limit(lim)];
-
-    if (distancia && distancia !== 'Todos') {
-      queryConstraints.push(where('distancia', '==', distancia));
-    }
-
-    if (desde) {
-      try {
-        const date = new Date(desde);
-        if (isNaN(date.getTime())) {
-          throw new Error('Fecha inválida');
-        }
-        queryConstraints.push(where('fecha', '>=', Timestamp.fromDate(date)));
-      } catch (error) {
-        return res.status(400).send({ error: 'Fecha inválida', message: 'El formato de fecha proporcionado no es válido' });
-      }
-    }
-
-    const finalQuery = query(valoresCollection, ...queryConstraints);
-    const snapshot = await getDocs(finalQuery);
-    const data = snapshot.docs.map(doc => {
-      const docData = doc.data();
-      return {
-        id: doc.id,
-        ...docData,
-        fecha: convertFechaToISO(docData.fecha) || 'Fecha inválida'
-      };
-    });
-
-    cache.set(cacheKey, data);
+    const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(50));
+    const snapshot = await getDocs(q);
+    const data = snapshot.docs.map(doc => doc.data());
     res.send(data);
   } catch (error) {
-    console.error('Error en /ver:', error);
-    res.status(500).send({ error: 'Error al obtener los registros', message: error.message });
+    console.error('Error al obtener valores:', error);
+    res.status(500).send('Error al obtener valores');
   }
 });
 
-// GET /valor
 app.get('/valor', async (req, res) => {
   try {
-    const lim = parseInt(req.query.limit, 10) || 100;
-    const cacheKey = `valor_${lim}`;
-    const cached = cache.get(cacheKey);
-    if (cached) return res.send(cached);
-
-    const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(lim));
+    const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(1));
     const snapshot = await getDocs(q);
-    const data = snapshot.docs.map(doc => {
-      const docData = doc.data();
-      return {
-        id: doc.id,
-        ...docData,
-        fecha: convertFechaToISO(docData.fecha) || 'Fecha inválida'
-      };
-    });
-
-    cache.set(cacheKey, data);
+    const data = snapshot.docs.map(doc => doc.data());
     res.send(data);
   } catch (error) {
-    console.error('Error en /valor:', error);
-    res.status(500).send({ error: 'Error al obtener valores', message: error.message });
+    console.error('Error al obtener último valor:', error);
+    res.status(500).send('Error al obtener último valor');
   }
 });
 
-// GET /valor/min
-app.get('/valor/min', async (req, res) => {
-  try {
-    const lim = parseInt(req.query.limit, 10) || 50;
-    const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(lim));
-    const snapshot = await getDocs(q);
-    const data = snapshot.docs.map(doc => {
-      const docData = doc.data();
-      return {
-        d: docData.distancia,
-        f: convertFechaToISO(docData.fecha) || 'Fecha inválida'
-      };
-    });
-    res.send(data);
-  } catch (error) {
-    console.error('Error en /valor/min:', error);
-    res.status(500).send({ error: 'Error en /valor/min', message: error.message });
-  }
-});
-
-// GET /estado
 app.get('/estado', async (req, res) => {
   try {
-    const lim = parseInt(req.query.limit) || 100;
-    const cacheKey = `estado_${lim}`;
-    const cached = cache.get(cacheKey);
-    if (cached) return res.send(cached);
-
-    const q = query(collection(db, 'Estado'), orderBy('fecha', 'desc'), limit(lim));
+    const q = query(collection(db, 'Estado'), orderBy('fecha', 'desc'), limit(1));
     const snapshot = await getDocs(q);
-    const data = snapshot.docs.map(doc => {
-      const docData = doc.data();
-      return {
-        id: doc.id,
-        ...docData,
-        fecha: convertFechaToISO(docData.fecha) || 'Fecha inválida'
-      };
-    });
-
-    cache.set(cacheKey, data);
+    const data = snapshot.docs.map(doc => doc.data());
     res.send(data);
   } catch (error) {
-    console.error('Error en /estado:', error);
-    res.status(500).send({ error: 'Error al obtener estados', message: error.message });
+    console.error('Error al obtener estado:', error);
+    res.status(500).send('Error al obtener estado');
   }
 });
 
-// POST /insertar (unchanged, already uses Timestamp)
 app.post('/insertar', async (req, res) => {
   try {
-    const { distancia, nombre, fecha } = req.body;
-    if (!distancia || !nombre) {
-      return res.status(400).send({ error: 'Faltan parámetros', message: 'distancia y nombre son requeridos' });
-    }
+    const { distancia, nombre } = req.body;
 
-    let timestamp;
-    if (fecha) {
-      try {
-        const date = new Date(fecha);
-        if (isNaN(date.getTime())) {
-          throw new Error('Fecha inválida');
-        }
-        timestamp = Timestamp.fromDate(date);
-      } catch (error) {
-        return res.status(400).send({ error: 'Fecha inválida', message: 'El formato de fecha proporcionado no es válido' });
-      }
-    } else {
-      timestamp = Timestamp.now();
-    }
-
-    const docData = {
+    await addDoc(collection(db, 'Valores'), {
       distancia,
       nombre,
-      fecha: timestamp
-    };
+      fecha: new Date().toISOString()
+    });
 
-    const docRef = await addDoc(collection(db, 'Valores'), docData);
-
-    cache.flushAll();
-    console.log('Caché de valores invalidada por nueva inserción.');
-
-    res.status(201).send({
-      id: docRef.id,
+    res.send({
       distancia,
       nombre,
-      fecha: timestamp.toDate().toISOString(),
-      status: 'Valores insertados'
+      fecha: new Date(),
+      status: 'Valores insertados!'
     });
   } catch (error) {
-    console.error('Error en /insertar:', error);
-    res.status(500).send({ error: 'Error en /insertar', message: error.message });
+    console.error('Error al insertar valores:', error);
+    res.status(500).send('Error al insertar valores');
   }
 });
 
-// POST /estado (unchanged, already uses Timestamp)
 app.post('/estado', async (req, res) => {
   try {
     const { conectado, nombre } = req.body;
-    if (conectado === undefined || !nombre) {
-      return res.status(400).send({ error: 'Faltan parámetros', message: 'conectado y nombre son requeridos' });
-    }
 
-    const docData = {
-      conectado: String(conectado).toLowerCase() === 'true',
+    await addDoc(collection(db, 'Estado'), {
+      conectado: conectado === 'true',
       nombre,
-      fecha: Timestamp.now()
-    };
+      fecha: new Date().toISOString()
+    });
 
-    const docRef = await addDoc(collection(db, 'Estado'), docData);
-
-    cache.flushAll();
-    console.log('Caché de estado invalidada por nueva inserción.');
-
-    res.status(201).send({
-      id: docRef.id,
-      conectado: docData.conectado,
+    res.send({
+      conectado,
       nombre,
-      fecha: docData.fecha.toDate().toISOString(),
-      status: 'Estado actualizado'
+      fecha: new Date(),
+      status: 'Estado actualizado!'
     });
   } catch (error) {
-    console.error('Error en /estado:', error);
-    res.status(500).send({ error: 'Error en /estado', message: error.message });
+    console.error('Error al insertar estado:', error);
+    res.status(500).send('Error al insertar estado');
   }
-});
-
-// POST /notificar (unchanged)
-app.post('/notificar', (req, res) => {
-  const { titulo, mensaje, token } = req.body;
-  if (!titulo || !mensaje || !token) {
-    return res.status(400).send({ error: 'Faltan parámetros', message: 'titulo, mensaje y token son requeridos' });
-  }
-  console.log(`Simulando envío de notificación a ${token}: ${titulo}`);
-  res.status(200).send({ status: 'Notificación enviada (simulada)' });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 API lista en http://localhost:${PORT}`);
+  console.log(`Escuchando en puerto ${PORT}`);
 });
