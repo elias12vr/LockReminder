@@ -70,18 +70,21 @@ app.get('/estado', async (req, res) => {
 
 app.post('/insertar', async (req, res) => {
   try {
-    const { distancia, nombre } = req.body;
+    const { distancia, nombre, fecha } = req.body;
+
+    // Use provided fecha if valid, otherwise generate a new ISO date
+    const dateToUse = fecha && !isNaN(Date.parse(fecha)) ? new Date(fecha).toISOString() : new Date().toISOString();
 
     await addDoc(collection(db, 'Valores'), {
       distancia,
       nombre,
-      fecha: new Date().toISOString()
+      fecha: dateToUse
     });
 
     res.send({
       distancia,
       nombre,
-      fecha: new Date(),
+      fecha: dateToUse,
       status: 'Valores insertados!'
     });
   } catch (error) {
@@ -92,18 +95,21 @@ app.post('/insertar', async (req, res) => {
 
 app.post('/estado', async (req, res) => {
   try {
-    const { conectado, nombre } = req.body;
+    const { conectado, nombre, fecha } = req.body;
+
+    // Use provided fecha if valid, otherwise generate a new ISO date
+    const dateToUse = fecha && !isNaN(Date.parse(fecha)) ? new Date(fecha).toISOString() : new Date().toISOString();
 
     await addDoc(collection(db, 'Estado'), {
       conectado: conectado === 'true',
       nombre,
-      fecha: new Date().toISOString()
+      fecha: dateToUse
     });
 
     res.send({
       conectado,
       nombre,
-      fecha: new Date(),
+      fecha: dateToUse,
       status: 'Estado actualizado!'
     });
   } catch (error) {
