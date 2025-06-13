@@ -23,7 +23,7 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.get('/', (req, res) => {
   res.send(
     '<h1>API Express & Firebase Monitoreo ESP32</h1><ul>' +
-    '<li><p><b>GET /ver</b> - Ver los últimos 50 valores</p></li>' +
+    '<li><p><b>GET /ver</b> - Ver todos los valores</p></li>' +
     '<li><p><b>GET /valor</b> - Último valor</p></li>' +
     '<li><p><b>GET /estado</b> - Último estado de conexión</p></li>' +
     '<li><p><b>POST /insertar</b> - {distancia, nombre, fecha}</p></li>' +
@@ -34,7 +34,7 @@ app.get('/', (req, res) => {
 
 app.get('/ver', async (req, res) => {
   try {
-    const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(50));
+    const q = query(collection(db, 'Valores'), orderBy('fecha', 'asc'));
     const snapshot = await getDocs(q);
     const data = snapshot.docs.map(doc => doc.data());
     res.send(data);
@@ -70,21 +70,18 @@ app.get('/estado', async (req, res) => {
 
 app.post('/insertar', async (req, res) => {
   try {
-    const { distancia, nombre, fecha } = req.body;
-
-    // Use provided fecha if valid, otherwise generate a new ISO date
-    const dateToUse = fecha && !isNaN(Date.parse(fecha)) ? new Date(fecha).toISOString() : new Date().toISOString();
+    const { distancia, nombre } = req.body;
 
     await addDoc(collection(db, 'Valores'), {
       distancia,
       nombre,
-      fecha: dateToUse
+      fecha: new Date().toISOString()
     });
 
     res.send({
       distancia,
       nombre,
-      fecha: dateToUse,
+      fecha: new Date(),
       status: 'Valores insertados!'
     });
   } catch (error) {
@@ -95,21 +92,18 @@ app.post('/insertar', async (req, res) => {
 
 app.post('/estado', async (req, res) => {
   try {
-    const { conectado, nombre, fecha } = req.body;
-
-    // Use provided fecha if valid, otherwise generate a new ISO date
-    const dateToUse = fecha && !isNaN(Date.parse(fecha)) ? new Date(fecha).toISOString() : new Date().toISOString();
+    const { conectado, nombre } = req.body;
 
     await addDoc(collection(db, 'Estado'), {
       conectado: conectado === 'true',
       nombre,
-      fecha: dateToUse
+      fecha: new Date().toISOString()
     });
 
     res.send({
       conectado,
       nombre,
-      fecha: dateToUse,
+      fecha: new Date(),
       status: 'Estado actualizado!'
     });
   } catch (error) {
