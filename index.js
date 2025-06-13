@@ -140,10 +140,20 @@ app.post('/insertar', async (req, res) => {
       return res.status(400).send({ error: 'Faltan parámetros', message: 'distancia y nombre son requeridos' });
     }
 
+    // Validar formato de fecha ISO 8601 con 'Z'
+    let fechaFinal;
+    const isoDateRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+    if (fecha && isoDateRegex.test(fecha)) {
+      fechaFinal = fecha;
+    } else {
+      console.warn(`Fecha inválida o ausente: ${fecha}. Usando fecha actual.`);
+      fechaFinal = new Date().toISOString();
+    }
+
     const docData = {
       distancia,
       nombre,
-      fecha: fecha || new Date().toISOString()
+      fecha: fechaFinal
     };
 
     const docRef = await addDoc(collection(db, 'Valores'), docData);
