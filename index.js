@@ -3,7 +3,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const compression = require('compression');
 const NodeCache = require('node-cache');
-const db = require('./fire'); // Your Firestore initialization
+const db = require('./fire');
 
 const {
   collection,
@@ -33,7 +33,6 @@ app.use((req, res, next) => {
 
 // --- Rutas ---
 
-// Documentación en la raíz (removing filter mention for /ver)
 app.get('/', (req, res) => {
   res.send(
     `<h1>API Express & Firebase Monitoreo ESP32</h1><ul>
@@ -48,7 +47,18 @@ app.get('/', (req, res) => {
   );
 });
 
-// GET /ver with fixed date handling and retained filters
+// Helper function to convert fecha to ISO string
+const convertFechaToISO = (fecha) => {
+  if (fecha instanceof Timestamp) {
+    return fecha.toDate().toISOString();
+  } else if (typeof fecha === 'string') {
+    const date = new Date(fecha);
+    return isNaN(date.getTime()) ? null : date.toISOString();
+  }
+  return null; // Handle unexpected types
+};
+
+// GET /ver
 app.get('/ver', async (req, res) => {
   try {
     const { distancia, desde, limit: limStr = '100' } = req.query;
@@ -81,11 +91,14 @@ app.get('/ver', async (req, res) => {
 
     const finalQuery = query(valoresCollection, ...queryConstraints);
     const snapshot = await getDocs(finalQuery);
-    const data = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      fecha: doc.data().fecha.toDate().toISOString() // Convert Timestamp to ISO string
-    }));
+    const data = snapshot.docs.map(doc => {
+      const docData = doc.data();
+      return {
+        id: doc.id,
+        ...docData,
+        fecha: convertFechaToISO(docData.fecha) || 'Fecha inválida'
+      };
+    });
 
     cache.set(cacheKey, data);
     res.send(data);
@@ -105,11 +118,14 @@ app.get('/valor', async (req, res) => {
 
     const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(lim));
     const snapshot = await getDocs(q);
-    const data = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      fecha: doc.data().fecha.toDate().toISOString()
-    }));
+    const data = snapshot.docs.map(doc => {
+      const docData = doc.data();
+      return {
+        id: doc.id,
+        ...docData,
+        fecha: convertFechaToISO(docData.fecha) || 'Fecha inválida'
+      };
+    });
 
     cache.set(cacheKey, data);
     res.send(data);
@@ -125,10 +141,13 @@ app.get('/valor/min', async (req, res) => {
     const lim = parseInt(req.query.limit, 10) || 50;
     const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(lim));
     const snapshot = await getDocs(q);
-    const data = snapshot.docs.map(doc => ({
-      d: doc.data().distancia,
-      f: doc.data().fecha.toDate().toISOString()
-    }));
+    const data = snapshot.docs.map(doc => {
+      const docData = doc.data();
+      return {
+        d: docData.distancia,
+        f: convertFechaToISO(docData.fecha) || 'Fecha inválida'
+      };
+    });
     res.send(data);
   } catch (error) {
     console.error('Error en /valor/min:', error);
@@ -146,11 +165,14 @@ app.get('/estado', async (req, res) => {
 
     const q = query(collection(db, 'Estado'), orderBy('fecha', 'desc'), limit(lim));
     const snapshot = await getDocs(q);
-    const data = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-      fecha: doc.data().fecha.toDate().toISOString()
-    }));
+    const data = snapshot.docs.map(doc => {
+      const docData = doc.data();
+      return {
+        id: doc.id,
+        ...docData,
+        fecha: convertFechaToISO(docData.fecha) || 'Fecha inválida'
+      };
+    });
 
     cache.set(cacheKey, data);
     res.send(data);
@@ -160,7 +182,7 @@ app.get('/estado', async (req, res) => {
   }
 });
 
-// POST /insertar
+// POST /insertar (unchanged, already uses Timestamp)
 app.post('/insertar', async (req, res) => {
   try {
     const { distancia, nombre, fecha } = req.body;
@@ -207,7 +229,7 @@ app.post('/insertar', async (req, res) => {
   }
 });
 
-// POST /estado
+// POST /estado (unchanged, already uses Timestamp)
 app.post('/estado', async (req, res) => {
   try {
     const { conectado, nombre } = req.body;
@@ -239,7 +261,7 @@ app.post('/estado', async (req, res) => {
   }
 });
 
-// POST /notificar
+// POST /notificar (unchanged)
 app.post('/notificar', (req, res) => {
   const { titulo, mensaje, token } = req.body;
   if (!titulo || !mensaje || !token) {
