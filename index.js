@@ -3,7 +3,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const compression = require('compression');
 const NodeCache = require('node-cache');
-const db = require('./fire'); // Tu inicialización de Firestore
+const db = require('./fire'); // Your Firestore initialization
 
 const {
   collection,
@@ -13,34 +13,31 @@ const {
   where,
   addDoc,
   limit,
-  Timestamp // Importante para consultas de fecha
+  Timestamp
 } = require('firebase/firestore');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Caché con TTL de 5 minutos (300 segundos)
 const cache = new NodeCache({ stdTTL: 300 });
 
-// --- Middleware ---
 app.use(cors());
-app.use(compression({ level: 6 })); // Comprime respuestas para mejor rendimiento
+app.use(compression({ level: 6 }));
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// Middleware de Cache-Control para el navegador
 app.use((req, res, next) => {
-  res.setHeader('Cache-Control', 'public, max-age=300'); // El navegador puede cachear por 5 min
+  res.setHeader('Cache-Control', 'public, max-age=300');
   next();
 });
 
 // --- Rutas ---
 
-// Documentación en la raíz
+// Documentación en la raíz (removing filter mention for /ver)
 app.get('/', (req, res) => {
   res.send(
     `<h1>API Express & Firebase Monitoreo ESP32</h1><ul>
-      <li><b>GET /ver</b> - Ver todos los valores (filtros: distancia, desde, limit)</li>
+      <li><b>GET /ver</b> - Ver todos los valores</li>
       <li><b>GET /valor</b> - Todos los valores (limitados)</li>
       <li><b>GET /valor/min</b> - Valores con respuesta mínima</li>
       <li><b>GET /estado</b> - Estados de conexión (limit)</li>
@@ -51,58 +48,54 @@ app.get('/', (req, res) => {
   );
 });
 
-// === GET /ver CON LÓGICA DE FILTROS MEJORADA ===
+// GET /ver with fixed date handling and retained filters
 app.get('/ver', async (req, res) => {
   try {
     const { distancia, desde, limit: limStr = '100' } = req.query;
-    const lim = parseInt(limStr, 10) || 100; // Asegurarse de que sea un número
+    const lim = parseInt(limStr, 10) || 100;
 
-    // Clave de caché única para esta combinación de filtros
     const cacheKey = `ver_${distancia || 'all'}_${desde || 'none'}_${lim}`;
     const cachedData = cache.get(cacheKey);
     if (cachedData) {
       return res.send(cachedData);
     }
 
-    // --- Lógica de consulta a Firestore refactorizada ---
     const valoresCollection = collection(db, 'Valores');
-    const queryConstraints = [orderBy('fecha', 'desc'), limit(lim)]; // Empezar con orden y límite
+    const queryConstraints = [orderBy('fecha', 'desc'), limit(lim)];
 
-    // 1. Añadir filtro de 'distancia' si se proporciona y no es 'Todos'
     if (distancia && distancia !== 'Todos') {
       queryConstraints.push(where('distancia', '==', distancia));
     }
 
-    // 2. Añadir filtro de 'fecha' si se proporciona
     if (desde) {
-      // Asumimos que 'desde' es un string en formato ISO 8601
-      queryConstraints.push(where('fecha', '>=', desde));
+      try {
+        const date = new Date(desde);
+        if (isNaN(date.getTime())) {
+          throw new Error('Fecha inválida');
+        }
+        queryConstraints.push(where('fecha', '>=', Timestamp.fromDate(date)));
+      } catch (error) {
+        return res.status(400).send({ error: 'Fecha inválida', message: 'El formato de fecha proporcionado no es válido' });
+      }
     }
-    
-    // NOTA: Para que una consulta con `where` en un campo y `orderBy` en otro funcione,
-    // Firestore requiere un índice compuesto. Si no existe, Firebase te dará un error
-    // en los logs con un enlace para crearlo con un solo clic.
 
-    // 3. Construir la consulta final con todas las restricciones
     const finalQuery = query(valoresCollection, ...queryConstraints);
-
     const snapshot = await getDocs(finalQuery);
     const data = snapshot.docs.map(doc => ({
       id: doc.id,
-      ...doc.data() // 'fecha' ya está incluida aquí
+      ...doc.data(),
+      fecha: doc.data().fecha.toDate().toISOString() // Convert Timestamp to ISO string
     }));
 
     cache.set(cacheKey, data);
     res.send(data);
-
   } catch (error) {
     console.error('Error en /ver:', error);
     res.status(500).send({ error: 'Error al obtener los registros', message: error.message });
   }
 });
 
-
-// GET /valor con paginación
+// GET /valor
 app.get('/valor', async (req, res) => {
   try {
     const lim = parseInt(req.query.limit, 10) || 100;
@@ -114,7 +107,8 @@ app.get('/valor', async (req, res) => {
     const snapshot = await getDocs(q);
     const data = snapshot.docs.map(doc => ({
       id: doc.id,
-      ...doc.data()
+      ...doc.data(),
+      fecha: doc.data().fecha.toDate().toISOString()
     }));
 
     cache.set(cacheKey, data);
@@ -125,25 +119,24 @@ app.get('/valor', async (req, res) => {
   }
 });
 
-// GET /valor/min (respuesta mínima)
+// GET /valor/min
 app.get('/valor/min', async (req, res) => {
   try {
     const lim = parseInt(req.query.limit, 10) || 50;
     const q = query(collection(db, 'Valores'), orderBy('fecha', 'desc'), limit(lim));
     const snapshot = await getDocs(q);
-    // Este endpoint no se cachea porque parece ser para un propósito específico y ligero
     const data = snapshot.docs.map(doc => ({
       d: doc.data().distancia,
-      f: doc.data().fecha
+      f: doc.data().fecha.toDate().toISOString()
     }));
     res.send(data);
   } catch (error) {
+    console.error('Error en /valor/min:', error);
     res.status(500).send({ error: 'Error en /valor/min', message: error.message });
   }
 });
 
-
-// GET /estado con límite
+// GET /estado
 app.get('/estado', async (req, res) => {
   try {
     const lim = parseInt(req.query.limit) || 100;
@@ -155,20 +148,19 @@ app.get('/estado', async (req, res) => {
     const snapshot = await getDocs(q);
     const data = snapshot.docs.map(doc => ({
       id: doc.id,
-      ...doc.data()
+      ...doc.data(),
+      fecha: doc.data().fecha.toDate().toISOString()
     }));
 
     cache.set(cacheKey, data);
     res.send(data);
   } catch (error) {
+    console.error('Error en /estado:', error);
     res.status(500).send({ error: 'Error al obtener estados', message: error.message });
   }
 });
 
-
-// --- Rutas POST ---
-
-// POST /insertar valor
+// POST /insertar
 app.post('/insertar', async (req, res) => {
   try {
     const { distancia, nombre, fecha } = req.body;
@@ -176,23 +168,41 @@ app.post('/insertar', async (req, res) => {
       return res.status(400).send({ error: 'Faltan parámetros', message: 'distancia y nombre son requeridos' });
     }
 
+    let timestamp;
+    if (fecha) {
+      try {
+        const date = new Date(fecha);
+        if (isNaN(date.getTime())) {
+          throw new Error('Fecha inválida');
+        }
+        timestamp = Timestamp.fromDate(date);
+      } catch (error) {
+        return res.status(400).send({ error: 'Fecha inválida', message: 'El formato de fecha proporcionado no es válido' });
+      }
+    } else {
+      timestamp = Timestamp.now();
+    }
+
     const docData = {
       distancia,
       nombre,
-      // Usar la fecha proporcionada o crear una nueva en formato ISO
-      fecha: fecha || new Date().toISOString()
+      fecha: timestamp
     };
 
     const docRef = await addDoc(collection(db, 'Valores'), docData);
 
-    // === MEJORA DE CACHÉ ===
-    // Invalida TODA la caché para asegurar que los nuevos datos se muestren en todas las consultas.
-    // Es la estrategia más simple y segura.
     cache.flushAll();
     console.log('Caché de valores invalidada por nueva inserción.');
 
-    res.status(201).send({ id: docRef.id, ...docData, status: 'Valores insertados' });
+    res.status(201).send({
+      id: docRef.id,
+      distancia,
+      nombre,
+      fecha: timestamp.toDate().toISOString(),
+      status: 'Valores insertados'
+    });
   } catch (error) {
+    console.error('Error en /insertar:', error);
     res.status(500).send({ error: 'Error en /insertar', message: error.message });
   }
 });
@@ -206,35 +216,39 @@ app.post('/estado', async (req, res) => {
     }
 
     const docData = {
-      conectado: String(conectado).toLowerCase() === 'true', // Conversión robusta a booleano
+      conectado: String(conectado).toLowerCase() === 'true',
       nombre,
-      fecha: new Date().toISOString()
+      fecha: Timestamp.now()
     };
 
     const docRef = await addDoc(collection(db, 'Estado'), docData);
-    
-    // Invalida la caché de estados
-    cache.flushAll(); // O podrías tener prefijos para borrar solo la de 'estado'
+
+    cache.flushAll();
     console.log('Caché de estado invalidada por nueva inserción.');
 
-    res.status(201).send({ id: docRef.id, ...docData, status: 'Estado actualizado' });
+    res.status(201).send({
+      id: docRef.id,
+      conectado: docData.conectado,
+      nombre,
+      fecha: docData.fecha.toDate().toISOString(),
+      status: 'Estado actualizado'
+    });
   } catch (error) {
+    console.error('Error en /estado:', error);
     res.status(500).send({ error: 'Error en /estado', message: error.message });
   }
 });
 
-// POST /notificar (solo estructura)
+// POST /notificar
 app.post('/notificar', (req, res) => {
   const { titulo, mensaje, token } = req.body;
   if (!titulo || !mensaje || !token) {
     return res.status(400).send({ error: 'Faltan parámetros', message: 'titulo, mensaje y token son requeridos' });
   }
-  // Aquí iría la lógica para enviar notificaciones con Firebase Cloud Messaging (FCM)
   console.log(`Simulando envío de notificación a ${token}: ${titulo}`);
   res.status(200).send({ status: 'Notificación enviada (simulada)' });
 });
 
-// --- Iniciar Servidor ---
 app.listen(PORT, () => {
   console.log(`🚀 API lista en http://localhost:${PORT}`);
 });
